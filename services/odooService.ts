@@ -11,15 +11,21 @@ const serialize = (value: any): string => {
   return `<value><string>${value}</string></value>`;
 };
 
-const parseValue = (node: Element): any => {
+const parseValue = (node: Element | null): any => {
+  if (!node) return null;
   const child = node.firstElementChild;
-  if (!child) return node.textContent?.trim();
+  if (!child) return node.textContent?.trim() || "";
+  
   const tag = child.tagName.toLowerCase();
-  if (tag === 'string') return child.textContent;
+  if (tag === 'string') return child.textContent || "";
   if (tag === 'int' || tag === 'i4') return parseInt(child.textContent || '0', 10);
   if (tag === 'double') return parseFloat(child.textContent || '0');
   if (tag === 'boolean') return child.textContent === '1' || child.textContent === 'true';
-  if (tag === 'array') return Array.from(child.querySelector('data')?.children || []).map(parseValue);
+  if (tag === 'array') {
+    const data = child.querySelector('data');
+    if (!data) return [];
+    return Array.from(data.children).map(v => parseValue(v as Element));
+  }
   if (tag === 'struct') {
     const obj: any = {};
     Array.from(child.children).forEach(member => {
@@ -29,7 +35,7 @@ const parseValue = (node: Element): any => {
     });
     return obj;
   }
-  return child.textContent;
+  return child.textContent || "";
 };
 
 export class OdooClient {
@@ -40,17 +46,31 @@ export class OdooClient {
     const target = `${this.url.replace(/\/$/, '')}/xmlrpc/2/${endpoint}`;
     const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(target)}`;
     
-    const res = await fetch(proxyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/xml' },
-      body: xml
-    });
-    
-    const text = await res.text();
-    const doc = new DOMParser().parseFromString(text, 'text/xml');
-    const fault = doc.querySelector('fault');
-    if (fault) throw new Error(doc.querySelector('string')?.textContent || 'Odoo Error');
-    return parseValue(doc.querySelector('param value')!);
+    try {
+      const res = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/xml' },
+        body: xml
+      });
+      
+      const text = await res.text();
+      const doc = new DOMParser().parseFromString(text, 'text/xml');
+      
+      const fault = doc.querySelector('fault');
+      if (fault) {
+        const faultValue = fault.querySelector('value');
+        const faultData = parseValue(faultValue);
+        throw new Error(faultData?.faultString || 'Odoo RPC Fault');
+      }
+
+      const valNode = doc.querySelector('param value');
+      if (!valNode) throw new Error('Respuesta inválida de Odoo.');
+
+      return parseValue(valNode);
+    } catch (e: any) {
+      console.error("RPC Error:", e);
+      throw new Error(e.message || "Error de red al conectar con Odoo.");
+    }
   }
 
   async authenticate(user: string, pass: string): Promise<number> {
@@ -68,6 +88,7 @@ export const OdooService = {
   async connect(url: string, db: string, user: string, pass: string) {
     const client = new OdooClient(url, db);
     const uid = await client.authenticate(user, pass);
+    if (!uid) throw new Error("Credenciales inválidas.");
     this.client = client;
     return { uid, client };
   },
@@ -75,23 +96,15 @@ export const OdooService = {
   async fetchProducts(session: OdooSession, mappings: WebCategoryMap[], publishedIds: number[]): Promise<Product[]> {
     if (!this.client) return [];
     
-    const domain: any[][] = [
-      ['sale_ok', '=', true],
-      ['company_id', '=', session.companyId]
-    ];
-    
-    // Si hay IDs seleccionados, solo traer esos
-    if (publishedIds.length > 0) {
-      domain.push(['id', 'in', publishedIds]);
-    } else {
-      // Si no hay publicados, no devolvemos nada al front (seguridad)
-      return [];
-    }
+    const domain: any[][] = [['sale_ok', '=', true], ['company_id', '=', session.companyId]];
+    if (publishedIds.length > 0) domain.push(['id', 'in', publishedIds]);
+    else return [];
 
     const fields = ['id', 'name', 'list_price', 'qty_available', 'image_1920', 'categ_id', 'manufacturer_id', 'description_sale'];
     const raw = await this.client.execute(session.uid, session.apiKey, 'product.product', 'search_read', [domain], { fields });
 
     return raw.map((p: any) => {
+      // Buscar mapeo por ID de categoría de Odoo
       const mapping = mappings.find(m => m.odooCategoryId === p.categ_id?.[0]);
       return {
         id: `odoo-${p.id}`,
@@ -99,7 +112,7 @@ export const OdooService = {
         name: p.name,
         brand: p.manufacturer_id?.[1] || 'Genérico',
         price: p.list_price || 0,
-        category: mapping?.webCategory || Category.Medicamentos,
+        category: mapping?.webCategory || Category.Medicamentos, // Usar mapeo o default
         prescription: PrescriptionStatus.NotRequired,
         description: p.description_sale || '',
         dosage: '',
