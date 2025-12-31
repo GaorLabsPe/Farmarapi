@@ -15,6 +15,34 @@ export enum PrescriptionStatus {
   NotRequired = 'NotRequired'
 }
 
+export enum OrderStatus {
+  Received = 'received',
+  Validated = 'validated',
+  Preparing = 'preparing',
+  Shipped = 'shipped',
+  Delivered = 'delivered'
+}
+
+export interface OrderStep {
+  status: OrderStatus;
+  title: string;
+  desc: string;
+  time: string;
+  completed: boolean;
+}
+
+export interface Order {
+  id: string;
+  customerEmail: string;
+  customerName: string;
+  address: string;
+  total: number;
+  date: string;
+  status: OrderStatus;
+  items: any[];
+  history: OrderStep[];
+}
+
 export interface HeroSlide {
   id: string;
   title: string;
@@ -23,8 +51,15 @@ export interface HeroSlide {
   description: string;
   image: string;
   cta: string;
-  ctaLink?: string;
+  isActive: boolean;
   badge: string;
+}
+
+export interface MobilePaymentMethod {
+  id: string;
+  name: string;
+  identifier: string;
+  qrCodeUrl?: string;
   isActive: boolean;
 }
 
@@ -49,7 +84,6 @@ export interface Product {
   registrationNumber: string;
   expiryDate: string;
   published: boolean;
-  odooCategoryId?: number;
 }
 
 export interface CartItem extends Product {
@@ -68,14 +102,15 @@ export interface OdooSession {
 
 export interface StoreSettings {
   storeName: string;
-  logoUrl?: string;
-  footerLogoUrl?: string;
+  logoUrl?: string; 
+  footerLogoUrl?: string; 
   primaryColor: string;
   footerText: string;
-  yapeNumber?: string;
-  yapeQr?: string;
-  plinNumber?: string;
-  plinQr?: string;
+  currencySymbol: string;
+  currencyCode: string;
+  locale: string;
+  country: string; // Nuevo campo
+  mobilePayments: MobilePaymentMethod[];
   whatsappNumber?: string;
   socialInstagram?: string;
   socialFacebook?: string;
@@ -84,7 +119,6 @@ export interface StoreSettings {
   allowPickup: boolean;
   promoActive: boolean;
   promoImage?: string;
-  promoLink?: string;
   promoTitle?: string;
   heroSlides: HeroSlide[];
 }
